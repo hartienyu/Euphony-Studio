@@ -1,3 +1,5 @@
+<img width="310" height="110" alt="Banner" src="https://github.com/user-attachments/assets/9ffc7ca7-d3bc-402a-8cec-844dfe4ce9e6" />
+
 # Euphony-Studio
 
 Euphony-Studio is an AI-powered soft piano application designed for musicians and developers, offering interactive music creation with expressive control and real-time sound customization. It supports real-time piano playback via Bluetooth (HC-05) and provides tools for converting between piano key numbers, MIDI files, and WAV audio. The application features a modular architecture, enabling seamless integration of serial communication, audio playback, and file conversion.
