@@ -1,13 +1,13 @@
+import asyncio
+import platform
 import pygame
-import numpy as np
-import os
 import time
+import numpy as np
 from com import initialize_serial, read_serial, close_serial
 from converter import Converter
 
 # Define directories
-media_dir = os.path.join(os.path.dirname(__file__), 'media')
-res_dir = os.path.join(os.path.dirname(__file__), 'res')
+media_dir = 'res/raw'  # MP3 files stored here
 
 # Initialize Pygame
 pygame.init()
@@ -18,15 +18,16 @@ small_font = pygame.font.Font(None, 28)
 
 # Set window icon
 try:
-    icon = pygame.image.load(os.path.join(res_dir, 'logo.png'))
+    icon = pygame.image.load('res/logo.png')
     pygame.display.set_icon(icon)
 except pygame.error:
     print("Failed to load logo.png for window icon")
 
 def initialize_pygame():
-    """Initialize Pygame mixer."""
+    """Initialize Pygame mixer with increased channels for polyphony."""
     try:
         pygame.mixer.init(frequency=22050, size=-16, channels=1, buffer=4096)
+        pygame.mixer.set_num_channels(16)  # Increase to 16 channels for polyphony
         return True, "Pygame mixer initialized successfully"
     except Exception as e:
         return False, f"Pygame mixer initialization failed: {e}"
@@ -45,23 +46,24 @@ def play_tone(frequency):
     try:
         tone_data = generate_tone(frequency, duration=1.0)
         sound = pygame.mixer.Sound(tone_data.tobytes())
-        sound.play()
-        time.sleep(1.0)
+        channel = pygame.mixer.find_channel()  # Find an available channel
+        if channel:
+            channel.play(sound)
     except Exception as e:
         print(f"Playback error: {e}")
 
 def play_piano_key(number):
-    """Play MP3 file for piano key number."""
-    if number is None:
+    """Play MP3 file for piano key number on an available channel."""
+    if number is None or not (1 <= number <= 88):
         return
-    mp3_file = os.path.join(media_dir, f"p{number}.mp3")
+    mp3_file = f"{media_dir}/p{number:02d}.mp3"
     try:
-        if os.path.exists(mp3_file):
-            sound = pygame.mixer.Sound(mp3_file)
-            sound.play()
-            time.sleep(sound.get_length())
+        sound = pygame.mixer.Sound(mp3_file)
+        channel = pygame.mixer.find_channel()  # Find an available channel
+        if channel:
+            channel.play(sound)
         else:
-            print(f"MP3 file not found: {mp3_file}")
+            print(f"No available channel to play: {mp3_file}")
     except Exception as e:
         print(f"Playback error: {e}")
 
@@ -76,23 +78,8 @@ def draw_button(screen, text, x, y, width, height, color, hover_color, font):
     screen.blit(text_surface, text_rect)
     return rect
 
-def main():
+async def main():
     """Main GUI function."""
-    # Ensure directories
-    os.makedirs(media_dir, exist_ok=True)
-    os.makedirs(res_dir, exist_ok=True)
-
-    # Load splash screen (310x110, no scaling)
-    try:
-        banner = pygame.image.load(os.path.join(res_dir, 'Banner.png'))
-        banner_rect = banner.get_rect(center=(400, 300))  # Center on 800x600 screen
-    except pygame.error:
-        banner = pygame.Surface((310, 110))
-        banner.fill((0, 0, 0))
-        text = font.render("Euphony Studio", True, (255, 255, 255))
-        banner.blit(text, text.get_rect(center=(155, 55)))
-        banner_rect = banner.get_rect(center=(400, 300))
-
     # Initialize Pygame mixer
     mixer_success, mixer_message = initialize_pygame()
     print(mixer_message)
@@ -111,24 +98,27 @@ def main():
     # GUI state
     mode = 'splash'
     splash_start = time.time()
-    piano_data = None
+    piano_data = []  # Changed to a list to store multiple active keys
     input_text = ''
     active_field = None
 
-    running = True
-    while running:
+    while True:
         screen.fill((255, 255, 255))  # White background
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                running = False
+                close_serial(ser)
+                pygame.mixer.quit()
+                pygame.quit()
+                print("Pygame mixer closed")
+                return
             elif event.type == pygame.MOUSEBUTTONDOWN and mode == 'menu':
                 mouse_pos = event.pos
                 if piano_button.collidepoint(mouse_pos):
                     mode = 'piano'
-                    piano_data = None
+                    piano_data = []
                 elif practice_button.collidepoint(mouse_pos):
                     mode = 'practice'
-                    piano_data = None
+                    piano_data = []
                 elif ai_button.collidepoint(mouse_pos):
                     mode = 'ai'
                 elif settings_button.collidepoint(mouse_pos):
@@ -177,6 +167,15 @@ def main():
                     input_text += event.unicode
 
         if mode == 'splash':
+            try:
+                banner = pygame.image.load('res/Banner.png')
+                banner_rect = banner.get_rect(center=(400, 300))
+            except pygame.error:
+                banner = pygame.Surface((310, 110))
+                banner.fill((0, 0, 0))
+                text = font.render("Euphony Studio", True, (255, 255, 255))
+                banner.blit(text, text.get_rect(center=(155, 55)))
+                banner_rect = banner.get_rect(center=(400, 300))
             screen.blit(banner, banner_rect)
             if time.time() - splash_start > 3:
                 mode = 'menu'
@@ -195,11 +194,23 @@ def main():
                 error_text = small_font.render(serial_error, True, (255, 0, 0))
                 screen.blit(error_text, (10, 10))
             else:
-                data = read_serial(ser)
-                if data is not None:
-                    piano_data = data
-                    play_tone(data)  # Use play_piano_key(data) for MP3 mode
-            text = font.render(f"Last Input: {piano_data if piano_data else 'None'}", True, (0, 0, 0))
+                if ser and ser.in_waiting > 0:
+                    try:
+                        data = ser.readline().decode('utf-8').strip()
+                        # Assume input is comma-separated numbers (e.g., "1,2,3")
+                        key_numbers = [int(num) for num in data.split(',') if num.strip().isdigit()]
+                        print(f"Received numbers: {key_numbers}")
+                        piano_data = key_numbers  # Store all active keys
+                        for number in key_numbers:
+                            if 1 <= number <= 88:
+                                play_piano_key(number)
+                            else:
+                                print(f"Invalid number: {number}")
+                    except ValueError:
+                        print(f"Invalid data: {data}")
+                    except Exception as e:
+                        print(f"Playback error: {e}")
+            text = font.render(f"Last Input: {', '.join(map(str, piano_data)) if piano_data else 'None'}", True, (0, 0, 0))
             screen.blit(text, (10, 50 if serial_error else 10))
             back_button = draw_button(screen, "Back", 10, 550, 100, 40, (200, 0, 0), (255, 100, 100), font)
         
@@ -208,15 +219,27 @@ def main():
                 error_text = small_font.render(serial_error, True, (255, 0, 0))
                 screen.blit(error_text, (10, 10))
             else:
-                data = read_serial(ser)
-                if data is not None:
-                    piano_data = data
-                    play_tone(data)  # Use play_piano_key(data) for MP3 mode
+                if ser and ser.in_waiting > 0:
+                    try:
+                        data = ser.readline().decode('utf-8').strip()
+                        # Assume input is comma-separated numbers (e.g., "1,2,3")
+                        key_numbers = [int(num) for num in data.split(',') if num.strip().isdigit()]
+                        print(f"Received numbers: {key_numbers}")
+                        piano_data = key_numbers  # Store all active keys
+                        for number in key_numbers:
+                            if 1 <= number <= 88:
+                                play_piano_key(number)
+                            else:
+                                print(f"Invalid number: {number}")
+                    except ValueError:
+                        print(f"Invalid data: {data}")
+                    except Exception as e:
+                        print(f"Playback error: {e}")
             for i in range(12):
                 x = 200 + i * 40
-                color = (255, 255, 255) if piano_data != i + 1 else (255, 255, 0)
+                color = (255, 255, 255) if (i + 1) not in piano_data else (255, 255, 0)
                 pygame.draw.rect(screen, color, (x, 300, 38, 100))
-            text = font.render(f"Key: {piano_data if piano_data else 'None'}", True, (0, 0, 0))
+            text = font.render(f"Keys: {', '.join(map(str, piano_data)) if piano_data else 'None'}", True, (0, 0, 0))
             screen.blit(text, (10, 50 if serial_error else 10))
             back_button = draw_button(screen, "Back", 10, 550, 100, 40, (200, 0, 0), (255, 100, 100), font)
         
@@ -241,11 +264,10 @@ def main():
             back_button = draw_button(screen, "Back", 10, 550, 100, 40, (200, 0, 0), (255, 100, 100), font)
 
         pygame.display.flip()
+        await asyncio.sleep(1.0 / 60)  # Control frame rate
 
-    close_serial(ser)
-    pygame.mixer.quit()
-    pygame.quit()
-    print("Pygame mixer closed")
-
-if __name__ == "__main__":
-    main()
+if platform.system() == "Emscripten":
+    asyncio.ensure_future(main())
+else:
+    if __name__ == "__main__":
+        asyncio.run(main())
