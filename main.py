@@ -4,6 +4,7 @@ import pygame
 import time
 import numpy as np
 import os
+import sys
 import note_seq
 from note_seq.protobuf import music_pb2
 from datetime import datetime
@@ -13,13 +14,21 @@ from com import initialize_serial, read_serial, close_serial
 from converter import Converter
 from music_extender import extend_midi
 
-# Define directories
-media_dir = 'media'  # MIDI files stored here
-model_dir = 'model'  # Model bundle files stored here
+# Get resource path, compatible with PyInstaller packaging
+def resource_path(relative_path):
+    """Return the absolute path to a resource, handling PyInstaller's temporary folder."""
+    if hasattr(sys, '_MEIPASS'):
+        # Resources are in PyInstaller's temporary folder during execution
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.abspath("."), relative_path)
+
+# Define directories using resource paths for PyInstaller compatibility
+media_dir = resource_path('media')  # Directory for storing MIDI files
+model_dir = resource_path('model')  # Directory for Magenta model files
 os.makedirs(media_dir, exist_ok=True)
 os.makedirs(model_dir, exist_ok=True)
 
-# Model bundle mapping
+# Model bundle mapping with resource paths
 MODEL_BUNDLES = {
     'basic_rnn': os.path.join(model_dir, 'basic_rnn.mag'),
     'mono_rnn': os.path.join(model_dir, 'mono_rnn.mag'),
@@ -36,11 +45,10 @@ small_font = pygame.font.Font(None, 28)
 
 # Set window icon
 try:
-    icon = pygame.image.load('res/logo.png')
+    icon = pygame.image.load(resource_path('res/logo.png'))
     pygame.display.set_icon(icon)
 except pygame.error:
     print("Failed to load logo.png for window icon")
-
 
 def initialize_pygame():
     """Initialize Pygame mixer with increased channels for polyphony."""
@@ -51,14 +59,12 @@ def initialize_pygame():
     except Exception as e:
         return False, f"Pygame mixer initialization failed: {e}"
 
-
 def generate_tone(frequency, duration=1.0, sample_rate=22050):
     """Generate a sine wave tone."""
     t = np.linspace(0, duration, int(sample_rate * duration), False)
     tone = np.sin(frequency * t * 2 * np.pi)
     audio = (tone * 32767).astype(np.int16)
     return audio
-
 
 def play_tone(frequency):
     """Play a tone for the given frequency."""
@@ -73,12 +79,11 @@ def play_tone(frequency):
     except Exception as e:
         print(f"Playback error: {e}")
 
-
 def play_piano_key(number):
     """Play MP3 file for piano key number on an available channel."""
     if number is None or not (1 <= number <= 88):
         return
-    mp3_file = f"res/raw/p{number:02d}.mp3"
+    mp3_file = resource_path(f"res/raw/p{number:02d}.mp3")
     try:
         sound = pygame.mixer.Sound(mp3_file)
         channel = pygame.mixer.find_channel()  # Find an available channel
@@ -88,7 +93,6 @@ def play_piano_key(number):
             print(f"No available channel to play: {mp3_file}")
     except Exception as e:
         print(f"Playback error: {e}")
-
 
 def draw_button(screen, text, x, y, width, height, color, hover_color, font):
     """Draw a button and return its rect."""
@@ -101,16 +105,13 @@ def draw_button(screen, text, x, y, width, height, color, hover_color, font):
     screen.blit(text_surface, text_rect)
     return rect
 
-
 def note_number_to_midi(note_number):
     """Convert piano key number (1-88) to MIDI note number (21-108)."""
     return note_number + 20  # Piano key 1 = MIDI note 21 (A0)
 
-
 def midi_to_note_numbers(sequence):
     """Convert MIDI notes back to piano key numbers (1-88) for serial output."""
     return [note.pitch - 20 for note in sequence.notes if 21 <= note.pitch <= 108]
-
 
 async def main():
     """Main GUI function."""
@@ -144,6 +145,15 @@ async def main():
     recorded_notes = []
     ai_error = None
 
+    # Initialize button variables to None to avoid UnboundLocalError
+    piano_button = None
+    practice_button = None
+    ai_button = None
+    settings_button = None
+    back_button = None
+    record_button = None
+    extend_button = None
+
     while True:
         screen.fill((255, 255, 255))  # White background
         for event in pygame.event.get():
@@ -157,13 +167,13 @@ async def main():
             # Handle clicks in main menu
             elif event.type == pygame.MOUSEBUTTONDOWN and mode == 'menu':
                 mouse_pos = event.pos
-                if piano_button.collidepoint(mouse_pos):
+                if piano_button is not None and piano_button.collidepoint(mouse_pos):
                     mode = 'piano'
                     piano_data = []
-                elif practice_button.collidepoint(mouse_pos):
+                elif practice_button is not None and practice_button.collidepoint(mouse_pos):
                     mode = 'practice'
                     piano_data = []
-                elif ai_button.collidepoint(mouse_pos):
+                elif ai_button is not None and ai_button.collidepoint(mouse_pos):
                     mode = 'ai'
                     recording = False
                     sequence = music_pb2.NoteSequence()
@@ -171,14 +181,14 @@ async def main():
                     recorded_notes = []
                     piano_data = []
                     ai_error = None
-                elif settings_button.collidepoint(mouse_pos):
+                elif settings_button is not None and settings_button.collidepoint(mouse_pos):
                     mode = 'settings'
                     input_text = ''
                     active_field = None
 
             # Handle clicks in sub-modes
             elif event.type == pygame.MOUSEBUTTONDOWN and mode in ['piano', 'practice', 'ai', 'settings']:
-                if back_button.collidepoint(event.pos):
+                if back_button is not None and back_button.collidepoint(event.pos):
                     mode = 'menu'
                     recording = False
                     sequence = None
@@ -187,7 +197,7 @@ async def main():
 
                 elif mode == 'ai':
                     mouse_pos = event.pos
-                    if record_button.collidepoint(mouse_pos):
+                    if record_button is not None and record_button.collidepoint(mouse_pos):
                         if not recording:
                             # Start recording new notes
                             recording = True
@@ -236,7 +246,7 @@ async def main():
                                     ai_error = f"Error verifying MIDI: {e}"
                                     print(ai_error)
 
-                    elif extend_button.collidepoint(mouse_pos):
+                    elif extend_button is not None and extend_button.collidepoint(mouse_pos):
                         # Extend an existing MIDI file chosen by user
                         try:
                             root = tk.Tk()
@@ -266,7 +276,7 @@ async def main():
 
                     # Change AI model selection
                     for model, button in model_buttons.items():
-                        if button.collidepoint(mouse_pos):
+                        if button is not None and button.collidepoint(mouse_pos):
                             ai_model = model
                             print(f"Selected AI model: {ai_model}")
 
@@ -282,7 +292,7 @@ async def main():
         # Splash screen
         if mode == 'splash':
             try:
-                banner = pygame.image.load('res/Banner.png')
+                banner = pygame.image.load(resource_path('res/Banner.png'))
                 banner_rect = banner.get_rect(center=(400, 300))
             except pygame.error:
                 banner = pygame.Surface((310, 110))
@@ -363,7 +373,6 @@ async def main():
 
         pygame.display.flip()
         await asyncio.sleep(1.0 / 60)  # Control frame rate
-
 
 if platform.system() == "Emscripten":
     asyncio.ensure_future(main())
