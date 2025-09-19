@@ -93,10 +93,7 @@ Euphony-Studio is an AI-powered soft piano application designed for musicians an
 
 ## Build
 
-The build artifacts for **Euphony-Studio** can be found in the `build` directory, including:
-
-- [Euphony-Studio 1.0.zip](build/Euphony-Studio%201.0.zip)
-- [Euphony-Studio 1.0.exe](build/Euphony-Studio%201.0.exe)
+The build artifacts for **Euphony-Studio** can be found in `Releases`.
 
 ### Build Instructions
 
