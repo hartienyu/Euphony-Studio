@@ -34,7 +34,7 @@ Euphony-Studio is an AI-powered soft piano application designed for musicians an
 1. **Clone the Repository**:
 
    ```bash
-   git clone https://github.com/<your-username>/Euphony-Studio.git
+   git clone https://github.com/hartienyu/Euphony-Studio.git
    cd Euphony-Studio
    ```
 
