@@ -91,6 +91,27 @@ Euphony-Studio is an AI-powered soft piano application designed for musicians an
    python -m serial.tools.miniterm
    ```
 
+## Build
+
+The build artifacts for **Euphony-Studio** can be found in the `build` directory, including:
+
+- [Euphony-Studio 1.0.zip](build/Euphony-Studio%201.0.zip)
+- [Euphony-Studio 1.0.exe](build/Euphony-Studio%201.0.exe)
+
+### Build Instructions
+
+Euphony-Studio can be built using **PyInstaller** in two ways:
+
+1. **One File** (Compact, slower startup)
+   ```bash
+   pyinstaller --onefile --add-data "model/*;model" --add-data "res/*;res" --add-data "media;media" --icon=res/logo.ico --hidden-import tensorflow_probability.python --hidden-import tensorflow_probability.python.experimental main.py
+   ```
+
+2. **One Directory** (More files, faster startup)
+   ```bash
+   pyinstaller --onedir --add-data "model/*;model" --add-data "res/*;res" --add-data "media;media" --icon=res/logo.png --hidden-import tensorflow_probability.python --hidden-import tensorflow_probability.python.experimental main.py
+   ```
+
 ## Usage
 
 1. **Prepare Audio and Model Files**:
