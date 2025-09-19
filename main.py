@@ -318,6 +318,60 @@ async def main():
             settings_button = draw_button(screen, "Settings", 300, 400, 200, 50,
                                           (0, 120, 200), (100, 180, 255), font)
 
+        # Piano mode
+        elif mode == 'piano':
+            if serial_error:
+                error_text = small_font.render(serial_error, True, (255, 0, 0))
+                screen.blit(error_text, (10, 10))
+            else:
+                if ser and ser.in_waiting > 0:
+                    try:
+                        data = ser.readline().decode('utf-8').strip()
+                        key_numbers = [int(num) for num in data.split(',') if num.strip().isdigit()]
+                        print(f"Received numbers: {key_numbers}")
+                        piano_data = key_numbers
+                        for number in key_numbers:
+                            if 1 <= number <= 88:
+                                play_piano_key(number)
+                            else:
+                                print(f"Invalid number: {number}")
+                    except ValueError:
+                        print(f"Invalid data: {data}")
+                    except Exception as e:
+                        print(f"Playback error: {e}")
+            text = font.render(f"Last Input: {', '.join(map(str, piano_data)) if piano_data else 'None'}", True, (0, 0, 0))
+            screen.blit(text, (10, 50 if serial_error else 10))
+            back_button = draw_button(screen, "Back", 10, 550, 100, 40, (200, 0, 0), (255, 100, 100), font)
+
+        # Practice mode
+        elif mode == 'practice':
+            if serial_error:
+                error_text = small_font.render(serial_error, True, (255, 0, 0))
+                screen.blit(error_text, (10, 10))
+            else:
+                if ser and ser.in_waiting > 0:
+                    try:
+                        data = ser.readline().decode('utf-8').strip()
+                        key_numbers = [int(num) for num in data.split(',') if num.strip().isdigit()]
+                        print(f"Received numbers: {key_numbers}")
+                        piano_data = key_numbers
+                        for number in key_numbers:
+                            if 1 <= number <= 88:
+                                play_piano_key(number)
+                            else:
+                                print(f"Invalid number: {number}")
+                    except ValueError:
+                        print(f"Invalid data: {data}")
+                    except Exception as e:
+                        print(f"Playback error: {e}")
+            for i in range(12):
+                x = 200 + i * 40
+                color = (255, 255, 255) if (i + 1) not in piano_data else (255, 255, 0)
+                pygame.draw.rect(screen, color, (x, 300, 38, 100))
+            text = font.render(f"Keys: {', '.join(map(str, piano_data)) if piano_data else 'None'}", True, (0, 0, 0))
+            screen.blit(text, (10, 50 if serial_error else 10))
+            back_button = draw_button(screen, "Back", 10, 550, 100, 40, (200, 0, 0), (255, 100, 100), font)
+
         # AI Composition mode
         elif mode == 'ai':
             if serial_error:
