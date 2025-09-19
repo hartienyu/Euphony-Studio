@@ -13,6 +13,7 @@ from tkinter import filedialog
 from com import initialize_serial, read_serial, close_serial
 from converter import Converter
 from music_extender import extend_midi
+from midi_to_led import MidiToLedController
 
 # Get resource path, compatible with PyInstaller packaging
 def resource_path(relative_path):
@@ -144,6 +145,13 @@ async def main():
     model_buttons = {}
     recorded_notes = []
     ai_error = None
+    generated_midi = None
+    # Practice mode state
+    selected_midi = None
+    playing_task = None
+    # Recording state
+    prev_keys = set()
+    active_notes = {}
 
     # Initialize button variables to None to avoid UnboundLocalError
     piano_button = None
@@ -153,6 +161,11 @@ async def main():
     back_button = None
     record_button = None
     extend_button = None
+    play_generated_button = None
+    canon_button = None
+    nocturne_button = None
+    custom_button = None
+    play_song_button = None
 
     while True:
         screen.fill((255, 255, 255))  # White background
@@ -164,7 +177,6 @@ async def main():
                 print("Pygame mixer closed")
                 return
 
-            # Handle clicks in main menu
             elif event.type == pygame.MOUSEBUTTONDOWN and mode == 'menu':
                 mouse_pos = event.pos
                 if piano_button is not None and piano_button.collidepoint(mouse_pos):
@@ -173,6 +185,10 @@ async def main():
                 elif practice_button is not None and practice_button.collidepoint(mouse_pos):
                     mode = 'practice'
                     piano_data = []
+                    selected_midi = None
+                    if playing_task:
+                        # Cancel if needed, but for simplicity, assume done
+                        playing_task = None
                 elif ai_button is not None and ai_button.collidepoint(mouse_pos):
                     mode = 'ai'
                     recording = False
@@ -181,53 +197,89 @@ async def main():
                     recorded_notes = []
                     piano_data = []
                     ai_error = None
+                    generated_midi = None
+                    prev_keys = set()
+                    active_notes = {}
+                    if playing_task:
+                        playing_task = None
                 elif settings_button is not None and settings_button.collidepoint(mouse_pos):
                     mode = 'settings'
                     input_text = ''
                     active_field = None
 
-            # Handle clicks in sub-modes
             elif event.type == pygame.MOUSEBUTTONDOWN and mode in ['piano', 'practice', 'ai', 'settings']:
-                if back_button is not None and back_button.collidepoint(event.pos):
+                mouse_pos = event.pos
+                if back_button is not None and back_button.collidepoint(mouse_pos):
                     mode = 'menu'
                     recording = False
                     sequence = None
                     recorded_notes = []
                     ai_error = None
+                    generated_midi = None
+                    selected_midi = None
+
+                elif mode == 'practice':
+                    if canon_button is not None and canon_button.collidepoint(mouse_pos):
+                        selected_midi = resource_path('res/Canon.mid')
+                    elif nocturne_button is not None and nocturne_button.collidepoint(mouse_pos):
+                        selected_midi = resource_path('res/Nocturne.mid')
+                    elif custom_button is not None and custom_button.collidepoint(mouse_pos):
+                        root = tk.Tk()
+                        root.withdraw()
+                        midi_path = filedialog.askopenfilename(
+                            title="Select MIDI File",
+                            filetypes=[("MIDI files", "*.mid")]
+                        )
+                        if midi_path:
+                            selected_midi = midi_path
+                    elif play_song_button is not None and play_song_button.collidepoint(mouse_pos) and selected_midi:
+                        if playing_task is None or playing_task.done():
+                            controller = MidiToLedController(
+                                midi_file=selected_midi,
+                                ser='COM3',
+                                baud_rate=115200,
+                                num_leds=142,
+                                min_midi_note=21,
+                                max_midi_note=108,
+                                play_function=play_piano_key
+                            )
+                            playing_task = asyncio.create_task(controller.play_midi())
 
                 elif mode == 'ai':
-                    mouse_pos = event.pos
                     if record_button is not None and record_button.collidepoint(mouse_pos):
                         if not recording:
-                            # Start recording new notes
                             recording = True
                             sequence = music_pb2.NoteSequence()
                             sequence.tempos.add(qpm=120)
                             recorded_notes = []
                             start_time = time.time()
+                            prev_keys = set()
+                            active_notes = {}
                             print("Started recording")
                             ai_error = None
                         else:
-                            # Stop recording and process
                             recording = False
+                            current_time = time.time()
+                            for pitch, note_start in list(active_notes.items()):
+                                end = current_time - start_time
+                                if end > 0:
+                                    sequence.notes.add(pitch=pitch, start_time=note_start, end_time=end, velocity=80)
+                            active_notes.clear()
                             if not sequence.notes:
                                 ai_error = "No notes recorded. No MIDI file saved."
                                 print(ai_error)
                             else:
-                                # Save recording
                                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                                 input_midi_path = os.path.join(media_dir, f"recording_{timestamp}.mid")
                                 note_seq.sequence_proto_to_midi_file(sequence, input_midi_path)
                                 print(f"Saved recording to {input_midi_path}")
 
-                                # Verify content
                                 try:
                                     saved_sequence = note_seq.midi_file_to_note_sequence(input_midi_path)
                                     if not saved_sequence.notes:
                                         os.remove(input_midi_path)
                                         ai_error = "Empty MIDI file deleted."
                                     else:
-                                        # Extend MIDI
                                         output_midi_path = os.path.join(media_dir, f"extended_{timestamp}.mid")
                                         bundle_path = MODEL_BUNDLES.get(ai_model, MODEL_BUNDLES['basic_rnn'])
                                         success = extend_midi(
@@ -240,6 +292,7 @@ async def main():
                                         )
                                         if success:
                                             print(f"Extended MIDI saved: {output_midi_path}")
+                                            generated_midi = output_midi_path
                                         else:
                                             ai_error = "MIDI extension failed."
                                 except Exception as e:
@@ -247,7 +300,6 @@ async def main():
                                     print(ai_error)
 
                     elif extend_button is not None and extend_button.collidepoint(mouse_pos):
-                        # Extend an existing MIDI file chosen by user
                         try:
                             root = tk.Tk()
                             root.withdraw()
@@ -269,18 +321,30 @@ async def main():
                                 )
                                 if success:
                                     print(f"Extended MIDI saved: {output_midi_path}")
+                                    generated_midi = output_midi_path
                                 else:
                                     ai_error = "Failed to extend selected MIDI."
                         except Exception as e:
                             ai_error = f"Error extending MIDI: {e}"
 
-                    # Change AI model selection
+                    elif play_generated_button is not None and play_generated_button.collidepoint(mouse_pos) and generated_midi:
+                        if playing_task is None or playing_task.done():
+                            controller = MidiToLedController(
+                                midi_file=generated_midi,
+                                ser='COM3',
+                                baud_rate=115200,
+                                num_leds=142,
+                                min_midi_note=21,
+                                max_midi_note=108,
+                                play_function=play_piano_key
+                            )
+                            playing_task = asyncio.create_task(controller.play_midi())
+
                     for model, button in model_buttons.items():
                         if button is not None and button.collidepoint(mouse_pos):
                             ai_model = model
                             print(f"Selected AI model: {ai_model}")
 
-            # Handle keyboard in settings
             elif event.type == pygame.KEYDOWN and mode == 'settings' and active_field:
                 if event.key == pygame.K_RETURN:
                     active_field = None
@@ -288,6 +352,45 @@ async def main():
                     input_text = input_text[:-1]
                 else:
                     input_text += event.unicode
+
+        # Handle AI recording input
+        if mode == 'ai' and recording and ser:
+            if ser.in_waiting > 0:
+                try:
+                    data = ser.readline().decode('utf-8').strip()
+                    key_numbers = [int(num) for num in data.split(',') if num.strip().isdigit()]
+                    current_keys = set(key_numbers)
+                    current_time = time.time() - start_time
+
+                    # Note ons
+                    for key in current_keys - prev_keys:
+                        if 1 <= key <= 88:
+                            pitch = note_number_to_midi(key)
+                            active_notes[pitch] = current_time
+
+                    # Note offs
+                    for key in prev_keys - current_keys:
+                        pitch = note_number_to_midi(key)
+                        if pitch in active_notes:
+                            start = active_notes.pop(pitch)
+                            sequence.notes.add(pitch=pitch, start_time=start, end_time=current_time, velocity=80)
+                            recorded_notes.append(key)
+
+                    prev_keys = current_keys
+                except ValueError:
+                    print(f"Invalid data: {data}")
+                except Exception as e:
+                    print(f"Error: {e}")
+
+        # Handle playing task done
+        if playing_task and playing_task.done():
+            try:
+                exc = playing_task.exception()
+                if exc:
+                    print(f"Playing error: {exc}")
+            except:
+                pass
+            playing_task = None
 
         # Splash screen
         if mode == 'splash':
@@ -349,7 +452,7 @@ async def main():
                 error_text = small_font.render(serial_error, True, (255, 0, 0))
                 screen.blit(error_text, (10, 10))
             else:
-                if ser and ser.in_waiting > 0:
+                if ser and ser.in_waiting > 0 and (playing_task is None or playing_task.done()):
                     try:
                         data = ser.readline().decode('utf-8').strip()
                         key_numbers = [int(num) for num in data.split(',') if num.strip().isdigit()]
@@ -370,6 +473,13 @@ async def main():
                 pygame.draw.rect(screen, color, (x, 300, 38, 100))
             text = font.render(f"Keys: {', '.join(map(str, piano_data)) if piano_data else 'None'}", True, (0, 0, 0))
             screen.blit(text, (10, 50 if serial_error else 10))
+            canon_button = draw_button(screen, "Canon", 100, 100, 150, 50, (0, 120, 200), (100, 180, 255), font)
+            nocturne_button = draw_button(screen, "Nocturne", 300, 100, 150, 50, (0, 120, 200), (100, 180, 255), font)
+            custom_button = draw_button(screen, "Custom MIDI", 500, 100, 150, 50, (0, 120, 200), (100, 180, 255), font)
+            if selected_midi:
+                sel_text = small_font.render(f"Selected: {os.path.basename(selected_midi)}", True, (0, 0, 0))
+                screen.blit(sel_text, (100, 170))
+                play_song_button = draw_button(screen, "Play Song" if playing_task is None or playing_task.done() else "Playing...", 300, 200, 200, 50, (0, 200, 0), (100, 255, 100), font)
             back_button = draw_button(screen, "Back", 10, 550, 100, 40, (200, 0, 0), (255, 100, 100), font)
 
         # AI Composition mode
@@ -397,11 +507,17 @@ async def main():
                 (255, 100, 100) if recording else (100, 180, 255), font
             )
 
-            # New button: extend an existing MIDI file
+            # Extend existing MIDI button
             extend_button = draw_button(
                 screen, "Extend Existing MIDI",
                 450, 400, 250, 50, (0, 120, 200), (100, 180, 255), font
             )
+
+            if generated_midi:
+                play_generated_button = draw_button(
+                    screen, "Play Extended" if playing_task is None or playing_task.done() else "Playing...",
+                    450, 300, 250, 50, (0, 200, 0), (100, 255, 100), font
+                )
 
             back_button = draw_button(screen, "Back", 10, 550, 100, 40,
                                       (200, 0, 0), (255, 100, 100), font)
